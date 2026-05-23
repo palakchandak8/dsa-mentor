@@ -1,21 +1,20 @@
 import { createClient } from '@/lib/supabase-server';
 import { SYSTEM_PROMPT } from '@/lib/constants';
 
-// Uses Groq — 100% FREE, no credit card
-// Model: llama-3.3-70b-versatile
-// Limits: 6,000 requests/day, 131k token context
 export async function POST(req) {
   try {
-    // 1. Auth check
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-    // 2. Parse request
+    // Use getSession instead of getUser — reads cookies reliably in API routes
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const user = session.user;
+
     const { messages, level, sessionId, userName } = await req.json();
     if (!messages?.length) return Response.json({ error: 'No messages' }, { status: 400 });
 
-    // 3. Call Groq
     const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -23,8 +22,8 @@ export async function POST(req) {
         'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
       },
       body: JSON.stringify({
-        model:      'llama-3.3-70b-versatile',
-        max_tokens: 1500,
+        model:       'llama-3.3-70b-versatile',
+        max_tokens:  1500,
         temperature: 0.7,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT(level || 'Beginner', userName) },
@@ -38,7 +37,6 @@ export async function POST(req) {
 
     const reply = groqData.choices[0].message.content;
 
-    // 4. Persist to Supabase
     if (sessionId) {
       const lastUser = messages[messages.length - 1];
       await supabase.from('messages').insert([
@@ -53,7 +51,7 @@ export async function POST(req) {
 
     return Response.json({ content: reply });
   } catch (err) {
-    console.error('[PC DSA Mentor] chat error:', err.message);
+    console.error('[PC DSA Mentor] error:', err.message);
     return Response.json({ error: err.message }, { status: 500 });
   }
 }
